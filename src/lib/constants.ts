@@ -1,6 +1,6 @@
-export const FISCAL_YEAR = 2024
-export const FISCAL_YEAR_START = new Date(2024, 0, 1)
-export const FISCAL_YEAR_END = new Date(2024, 11, 31)
+export const FISCAL_YEAR = 2025
+export const FISCAL_YEAR_START = new Date(2025, 0, 1)
+export const FISCAL_YEAR_END = new Date(2025, 11, 31)
 
 // Countries that typically appear in IBKR dividend descriptions
 // Maps first 2 chars of ISIN to country name
