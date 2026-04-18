@@ -1,0 +1,38 @@
+{
+  "name": "ibkr-renta",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@tanstack/react-table": "^8.21.3",
+    "papaparse": "^5.5.3",
+    "fast-xml-parser": "^4.5.1",
+    "xlsx": "^0.18.5",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
+    "react-dropzone": "^14.3.8",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.6.0",
+    "lucide-react": "^0.511.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7",
+    "@types/papaparse": "^5.3.15",
+    "@vitejs/plugin-react": "^4.5.2",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}
