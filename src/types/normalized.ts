@@ -48,6 +48,40 @@ export interface NormalizedDividend {
   country: string           // 2-letter ISO, derived from ISIN
 }
 
+export type CorporateActionType =
+  | 'forward_split'
+  | 'reverse_split'
+  | 'cash_merger'
+  | 'stock_merger'
+  | 'spinoff'
+  | 'symbol_change'
+  | 'stock_dividend'
+  | 'other'
+
+export interface NormalizedCorporateAction {
+  id: string
+  source: SourceFormat
+  type: CorporateActionType
+  symbol: string        // symbol affected (pre-action)
+  isin?: string
+  date: Date
+  description: string
+  // Splits
+  splitRatio?: number   // newShares / oldShares (>1 forward, <1 reverse)
+  // Cash mergers / tender offers
+  cashPerShare?: number    // in original currency
+  cashCurrency?: string
+  cashEurRate?: number     // EUR per 1 cashCurrency on event date
+  // Stock mergers / spinoffs / symbol changes
+  newSymbol?: string
+  newIsin?: string
+  stockExchangeRatio?: number  // new shares per old share
+  // Spinoff: fraction of original cost basis that transfers to new symbol
+  spinoffCostBasisFraction?: number
+  // Number of shares involved (e.g. stock dividend shares added)
+  quantity?: number
+}
+
 export interface NormalizedStatement {
   accountId: string
   accountAlias?: string
@@ -57,5 +91,7 @@ export interface NormalizedStatement {
   generatedAt: Date
   trades: NormalizedTrade[]
   dividends: NormalizedDividend[]
+  corporateActions: NormalizedCorporateAction[]
   rawWarnings: string[]
+  ecbRatesUsed: boolean
 }

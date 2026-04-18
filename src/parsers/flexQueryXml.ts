@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser'
-import type { IBKRRawStatement, IBKRRawTrade, IBKRRawDividend, IBKRRawWithholdingTax, IBKRRawOpenPosition } from '@/types/ibkr'
+import type { IBKRRawStatement, IBKRRawTrade, IBKRRawDividend, IBKRRawWithholdingTax, IBKRRawOpenPosition, IBKRRawCorporateAction } from '@/types/ibkr'
+import { extractSymbolFromDescription, extractIsinFromDescription } from './activityStatementCsv'
 
 function num(val: string | number | undefined): number {
   if (val === undefined || val === '' || val === null) return 0
@@ -124,11 +125,30 @@ function parseOpenPositions(raw: any[]): IBKRRawOpenPosition[] {
     })
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseCorporateActions(raw: any[]): IBKRRawCorporateAction[] {
+  return raw.map(ca => ({
+    assetCategory: String(ca.assetCategory ?? ''),
+    currency: String(ca.currency ?? 'USD'),
+    symbol: extractSymbolFromDescription(String(ca.description ?? ca.symbol ?? '')),
+    isin: ca.isin ? String(ca.isin) : extractIsinFromDescription(String(ca.description ?? '')),
+    description: String(ca.description ?? ''),
+    reportDate: String(ca.reportDate ?? ca.dateTime ?? '').split(';')[0],
+    dateTime: String(ca.dateTime ?? ca.reportDate ?? '').replace(';', ' '),
+    quantity: num(ca.quantity),
+    proceeds: num(ca.proceeds),
+    value: num(ca.value),
+    realizedPnL: num(ca.realizedPnl ?? ca.fifoPnlRealized),
+    code: String(ca.code ?? ''),
+    typeCode: ca.type ? String(ca.type) : undefined,
+  }))
+}
+
 export function parseFlexQueryXml(xmlText: string): IBKRRawStatement {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '',
-    isArray: (name) => ['Trade', 'CashTransaction', 'OpenPosition', 'FlexStatement'].includes(name),
+    isArray: (name) => ['Trade', 'CashTransaction', 'OpenPosition', 'CorporateAction', 'FlexStatement'].includes(name),
   })
 
   const doc = parser.parse(xmlText)
@@ -139,6 +159,7 @@ export function parseFlexQueryXml(xmlText: string): IBKRRawStatement {
   const rawTrades = toArray(stmt?.Trades?.Trade)
   const rawCash = toArray(stmt?.CashTransactions?.CashTransaction)
   const rawPositions = toArray(stmt?.OpenPositions?.OpenPosition)
+  const rawCAs = toArray(stmt?.CorporateActions?.CorporateAction)
 
   const { dividends, withholdingTax } = parseCashTransactions(rawCash)
 
@@ -150,5 +171,6 @@ export function parseFlexQueryXml(xmlText: string): IBKRRawStatement {
     dividends,
     withholdingTax,
     openPositions: parseOpenPositions(rawPositions),
+    corporateActions: parseCorporateActions(rawCAs),
   }
 }

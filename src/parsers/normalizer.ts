@@ -1,12 +1,14 @@
-import type { IBKRRawStatement, IBKRRawTrade, IBKRRawDividend, IBKRRawWithholdingTax } from '@/types/ibkr'
-import type { NormalizedStatement, NormalizedTrade, NormalizedDividend, AssetType, BuySell, OpenClose } from '@/types/normalized'
+import type { IBKRRawStatement, IBKRRawTrade, IBKRRawDividend, IBKRRawWithholdingTax, IBKRRawCorporateAction } from '@/types/ibkr'
+import type { NormalizedStatement, NormalizedTrade, NormalizedDividend, NormalizedCorporateAction, AssetType, BuySell, OpenClose, CorporateActionType } from '@/types/normalized'
+import type { EcbRateLookup } from '@/lib/ecbRates'
 import { generateId } from '@/lib/utils'
 import { countryFromIsin } from '@/lib/constants'
 import { KNOWN_ETF_ISINS } from '@/lib/constants'
 import { FISCAL_YEAR } from '@/types/tax'
 import { extractIsinFromDescription, extractSymbolFromDescription } from './activityStatementCsv'
 
-// Parse IBKR date formats: "2024-03-15", "2024-03-15 10:30:00", "2024-03-15, 10:30:00"
+// ── Date parsing ─────────────────────────────────────────────────────────────
+
 function parseIbkrDate(val: string): Date | null {
   if (!val || val === '--') return null
   const clean = val.replace(',', '').trim()
@@ -16,7 +18,6 @@ function parseIbkrDate(val: string): Date | null {
 
 function parseExpiry(val: string | undefined): Date | undefined {
   if (!val) return undefined
-  // Formats: "20241220" or "2024-12-20"
   if (/^\d{8}$/.test(val)) {
     return new Date(
       parseInt(val.slice(0, 4), 10),
@@ -28,14 +29,33 @@ function parseExpiry(val: string | undefined): Date | undefined {
   return isNaN(d.getTime()) ? undefined : d
 }
 
-// EUR per 1 foreign currency unit. IBKR provides rate as "units of base per 1 foreign".
-// If base is EUR and currency is USD with fxRateToBase=0.93, then 1 USD = 0.93 EUR.
-function resolveEurRate(currency: string, fxRateToBase: number | undefined): number {
+// ── FX rate resolution ────────────────────────────────────────────────────────
+// Priority: 1) ECB rate for the date  2) IBKR embedded fxRateToBase  3) 1:1 (with warning)
+
+function resolveEurRate(
+  currency: string,
+  date: Date,
+  fxRateToBase: number | undefined,
+  ecbRates: EcbRateLookup | null,
+  warnings: string[],
+  context: string
+): number {
   if (currency === 'EUR') return 1
+
+  if (ecbRates) {
+    const ecbRate = ecbRates(currency, date)
+    if (ecbRate > 0) return ecbRate
+    // ECB doesn't cover this currency — fall through to IBKR rate
+    warnings.push(`Tipo BCE no disponible para ${currency} (${context}); usando tipo IBKR.`)
+  }
+
   if (fxRateToBase && fxRateToBase > 0) return fxRateToBase
-  // Fallback: treat as 1:1 and emit warning
+
+  warnings.push(`Sin tipo de cambio para ${currency} (${context}); usando 1:1. Ajusta manualmente.`)
   return 1
 }
+
+// ── Asset classification ──────────────────────────────────────────────────────
 
 function classifyAsset(raw: IBKRRawTrade): AssetType {
   const cat = raw.assetCategory.toLowerCase()
@@ -57,19 +77,20 @@ function parseOpenClose(val: string): OpenClose {
   return 'close'
 }
 
-function normalizeTradeRow(raw: IBKRRawTrade, warnings: string[]): NormalizedTrade[] {
+// ── Trade normalization ───────────────────────────────────────────────────────
+
+function normalizeTradeRow(
+  raw: IBKRRawTrade,
+  source: 'activity-csv' | 'flex-xml' | 'flex-csv',
+  ecbRates: EcbRateLookup | null,
+  warnings: string[]
+): NormalizedTrade[] {
   const tradeDate = parseIbkrDate(raw.dateTime)
   if (!tradeDate) {
-    warnings.push(`Trade ignorado: fecha inválida "${raw.dateTime}" para ${raw.symbol}`)
+    warnings.push(`Operación ignorada: fecha inválida "${raw.dateTime}" para ${raw.symbol}`)
     return []
   }
 
-  const eurRate = resolveEurRate(raw.currency, raw.fxRateToBase)
-  if (raw.currency !== 'EUR' && !raw.fxRateToBase) {
-    warnings.push(`Sin tasa FX para ${raw.symbol} (${raw.currency}) el ${raw.dateTime}; usando 1:1`)
-  }
-
-  const qty = raw.quantity
   const assetType = classifyAsset(raw)
   const multiplier = raw.multiplier && raw.multiplier > 1 ? raw.multiplier : 1
   const commission = raw.commissions <= 0 ? raw.commissions : -Math.abs(raw.commissions)
@@ -78,9 +99,14 @@ function normalizeTradeRow(raw: IBKRRawTrade, warnings: string[]): NormalizedTra
   const buySell = parseBuySell(raw.buySell)
   const openClose = parseOpenClose(raw.openCloseIndicator)
 
+  const eurRate = resolveEurRate(
+    raw.currency, tradeDate, raw.fxRateToBase, ecbRates, warnings,
+    `${raw.symbol} ${raw.dateTime}`
+  )
+
   const base: NormalizedTrade = {
     id: generateId('trade'),
-    source: 'activity-csv',
+    source,
     assetType,
     symbol: assetType === 'option' ? (raw.underlyingSymbol ?? raw.symbol.split(' ')[0]) : raw.symbol,
     optionSymbol: assetType === 'option' ? raw.symbol : undefined,
@@ -88,7 +114,7 @@ function normalizeTradeRow(raw: IBKRRawTrade, warnings: string[]): NormalizedTra
     description: raw.description,
     currency: raw.currency,
     tradeDate,
-    quantity: qty,
+    quantity: raw.quantity,
     pricePerUnit: raw.tradePrice,
     grossProceeds,
     commission,
@@ -108,22 +134,25 @@ function normalizeTradeRow(raw: IBKRRawTrade, warnings: string[]): NormalizedTra
 
   // Split "C;O" (close then open same day) into two synthetic trades
   if (openClose === 'open-close') {
-    const closeQty = -Math.abs(qty)
-    const openQty = Math.abs(qty)
+    const closeQty = -Math.abs(raw.quantity)
+    const openQty   = Math.abs(raw.quantity)
     const halfProceeds = netProceeds / 2
     return [
       { ...base, id: generateId('trade'), openClose: 'close', quantity: closeQty, buySell: 'sell', netProceeds: halfProceeds, netProceedsEur: halfProceeds * eurRate },
-      { ...base, id: generateId('trade'), openClose: 'open', quantity: openQty, buySell: 'buy', netProceeds: halfProceeds, netProceedsEur: halfProceeds * eurRate },
+      { ...base, id: generateId('trade'), openClose: 'open',  quantity: openQty,  buySell: 'buy',  netProceeds: halfProceeds, netProceedsEur: halfProceeds * eurRate },
     ]
   }
 
   return [base]
 }
 
-// Match dividends + withholding tax by (symbol, date)
+// ── Dividend normalization ────────────────────────────────────────────────────
+
 function matchDividendsAndWithholding(
   rawDividends: IBKRRawDividend[],
   rawWithholding: IBKRRawWithholdingTax[],
+  source: 'activity-csv' | 'flex-xml' | 'flex-csv',
+  ecbRates: EcbRateLookup | null,
   warnings: string[]
 ): NormalizedDividend[] {
   const result: NormalizedDividend[] = []
@@ -134,24 +163,22 @@ function matchDividendsAndWithholding(
     const divDate = parseIbkrDate(div.date)
     if (!divDate || div.amount <= 0) continue
 
-    // Find matching withholding
     const wh = rawWithholding.find(w => {
-      const wSym = extractSymbolFromDescription(w.description)
+      const wSym  = extractSymbolFromDescription(w.description)
       const wDate = parseIbkrDate(w.date)
-      return wSym === sym && wDate && Math.abs(wDate.getTime() - divDate.getTime()) < 86400000 * 3
+      return wSym === sym && wDate && Math.abs(wDate.getTime() - divDate.getTime()) < 86_400_000 * 3
     })
 
     const withheld = wh ? Math.abs(wh.amount) : 0
-    const eurRate = 1 // dividends in USD need FX — we'll flag this
-    const country = isin ? countryFromIsin(isin) : 'Desconocido'
 
-    if (div.currency !== 'EUR' && eurRate === 1) {
-      warnings.push(`Dividendo de ${sym}: sin tasa EUR para ${div.currency}. Importa en moneda original.`)
-    }
+    const eurRate = resolveEurRate(
+      div.currency, divDate, undefined, ecbRates, warnings,
+      `dividendo ${sym} ${div.date}`
+    )
 
     result.push({
       id: generateId('div'),
-      source: 'activity-csv',
+      source,
       symbol: sym,
       isin,
       description: div.description,
@@ -161,11 +188,10 @@ function matchDividendsAndWithholding(
       grossAmountEur: div.amount * eurRate,
       withholdingTax: withheld,
       withholdingTaxEur: withheld * eurRate,
-      country,
+      country: isin ? countryFromIsin(isin) : 'Desconocido',
     })
   }
 
-  // Warn about unmatched withholding
   for (const wh of rawWithholding) {
     if (wh.amount >= 0) continue
     const sym = extractSymbolFromDescription(wh.description)
@@ -178,32 +204,124 @@ function matchDividendsAndWithholding(
   return result
 }
 
+// ── Corporate action normalization ────────────────────────────────────────────
+
+// Parse split ratio from description: "AAPL(ISIN) Split 4 for 1" → 4
+// "AMZN(ISIN) Split 1 for 10" → 0.1  (reverse split)
+function parseSplitRatio(desc: string): number | undefined {
+  const m = desc.match(/Split\s+(\d+(?:\.\d+)?)\s+for\s+(\d+(?:\.\d+)?)/i)
+  if (!m) return undefined
+  return parseFloat(m[1]) / parseFloat(m[2])
+}
+
+// Detect type from description + IBKR code
+function detectCaType(
+  desc: string,
+  code: string,
+  typeCode: string | undefined
+): CorporateActionType {
+  const d = desc.toLowerCase()
+  const c = (typeCode ?? code).toUpperCase()
+
+  if (c === 'FS' || (d.includes('split') && parseSplitRatio(desc) !== undefined && (parseSplitRatio(desc) ?? 0) > 1)) return 'forward_split'
+  if (c === 'RS' || (d.includes('split') && (parseSplitRatio(desc) ?? 1) < 1)) return 'reverse_split'
+  if (d.includes('split') && parseSplitRatio(desc) !== undefined) {
+    return (parseSplitRatio(desc) ?? 1) >= 1 ? 'forward_split' : 'reverse_split'
+  }
+  if (c === 'TC' || d.includes('tender') || d.includes('acquisition') || d.includes('merger')) return 'cash_merger'
+  if (c === 'TO') return 'stock_merger'
+  if (c === 'SO' || d.includes('spinoff') || d.includes('spin-off')) return 'spinoff'
+  if (c === 'OR' || d.includes('name change') || d.includes('symbol change') || d.includes('reorganiz')) return 'symbol_change'
+  if (c === 'SD' || d.includes('stock dividend')) return 'stock_dividend'
+  return 'other'
+}
+
+function normalizeCorporateAction(
+  raw: IBKRRawCorporateAction,
+  source: 'activity-csv' | 'flex-xml' | 'flex-csv',
+  ecbRates: EcbRateLookup | null,
+  warnings: string[]
+): NormalizedCorporateAction | null {
+  const date = parseIbkrDate(raw.dateTime) ?? parseIbkrDate(raw.reportDate)
+  if (!date) {
+    warnings.push(`Acción corporativa ignorada: fecha inválida para ${raw.symbol} — "${raw.description}"`)
+    return null
+  }
+
+  const type = detectCaType(raw.description, raw.code, raw.typeCode)
+  const splitRatio = parseSplitRatio(raw.description)
+
+  // Cash per share for mergers: try to extract from description or use proceeds/quantity
+  let cashPerShare: number | undefined
+  let cashCurrency: string | undefined
+  let cashEurRate: number | undefined
+
+  if (type === 'cash_merger' && raw.proceeds !== 0 && Math.abs(raw.quantity) > 0) {
+    cashPerShare = Math.abs(raw.proceeds / raw.quantity)
+    cashCurrency = raw.currency
+    cashEurRate = resolveEurRate(raw.currency, date, undefined, ecbRates, warnings, `fusión ${raw.symbol}`)
+  } else if (type === 'cash_merger') {
+    // Try extracting cash per share from description: "... at 45.00 per Share"
+    const m = raw.description.match(/at\s+([\d.]+)\s+per\s+share/i)
+    if (m) {
+      cashPerShare = parseFloat(m[1])
+      cashCurrency = raw.currency
+      cashEurRate = resolveEurRate(raw.currency, date, undefined, ecbRates, warnings, `fusión ${raw.symbol}`)
+    }
+  }
+
+  // New symbol for spinoffs / mergers (search after colon or in description)
+  let newSymbol: string | undefined
+  const spinoffMatch = raw.description.match(/Spinoff[:\s]+([A-Z0-9.]+)/i)
+  if (spinoffMatch) newSymbol = spinoffMatch[1]
+
+  return {
+    id: generateId('ca'),
+    source,
+    type,
+    symbol: raw.symbol,
+    isin: raw.isin,
+    date,
+    description: raw.description,
+    splitRatio,
+    cashPerShare,
+    cashCurrency,
+    cashEurRate,
+    newSymbol,
+    quantity: raw.quantity || undefined,
+  }
+}
+
+// ── Main normalizer ───────────────────────────────────────────────────────────
+
 export function normalizeStatement(
   raw: IBKRRawStatement,
-  source: 'activity-csv' | 'flex-xml' | 'flex-csv'
+  source: 'activity-csv' | 'flex-xml' | 'flex-csv',
+  ecbRates: EcbRateLookup | null = null
 ): NormalizedStatement {
   const warnings: string[] = []
 
-  const trades: NormalizedTrade[] = raw.trades.flatMap(t => {
-    const normalized = normalizeTradeRow(t, warnings)
-    return normalized.map(n => ({ ...n, source }))
-  })
-
-  // Filter only fiscal year trades
-  const fiscalTrades = trades.filter(t =>
-    t.tradeDate.getFullYear() === FISCAL_YEAR
+  const trades: NormalizedTrade[] = raw.trades.flatMap(t =>
+    normalizeTradeRow(t, source, ecbRates, warnings)
   )
+
+  const fiscalTrades = trades.filter(t => t.tradeDate.getFullYear() === FISCAL_YEAR)
   const otherYearCount = trades.length - fiscalTrades.length
   if (otherYearCount > 0) {
     warnings.push(`${otherYearCount} operaciones fuera del año fiscal ${FISCAL_YEAR} fueron ignoradas.`)
   }
 
-  const dividends = matchDividendsAndWithholding(raw.dividends, raw.withholdingTax, warnings)
-    .filter(d => d.payDate.getFullYear() === FISCAL_YEAR)
-    .map(d => ({ ...d, source }))
+  const dividends = matchDividendsAndWithholding(
+    raw.dividends, raw.withholdingTax, source, ecbRates, warnings
+  ).filter(d => d.payDate.getFullYear() === FISCAL_YEAR)
+
+  const corporateActions: NormalizedCorporateAction[] = (raw.corporateActions ?? [])
+    .map(ca => normalizeCorporateAction(ca, source, ecbRates, warnings))
+    .filter((ca): ca is NormalizedCorporateAction => ca !== null)
+    .filter(ca => ca.date.getFullYear() === FISCAL_YEAR)
 
   const fromDate = parseIbkrDate(raw.fromDate) ?? new Date(FISCAL_YEAR, 0, 1)
-  const toDate = parseIbkrDate(raw.toDate) ?? new Date(FISCAL_YEAR, 11, 31)
+  const toDate   = parseIbkrDate(raw.toDate)   ?? new Date(FISCAL_YEAR, 11, 31)
 
   return {
     accountId: raw.accountId,
@@ -213,11 +331,14 @@ export function normalizeStatement(
     generatedAt: new Date(),
     trades: fiscalTrades,
     dividends,
+    corporateActions,
     rawWarnings: warnings,
+    ecbRatesUsed: ecbRates !== null,
   }
 }
 
-// Merge two statements (e.g. from CSV + XML for same account), deduplicating by fingerprint
+// ── Statement merge ───────────────────────────────────────────────────────────
+
 export function mergeStatements(a: NormalizedStatement, b: NormalizedStatement): NormalizedStatement {
   const tradeFingerprint = (t: NormalizedTrade) =>
     `${t.symbol}_${t.tradeDate.getTime()}_${t.quantity}_${t.pricePerUnit}`
@@ -230,7 +351,16 @@ export function mergeStatements(a: NormalizedStatement, b: NormalizedStatement):
   const seenDivs = new Set(a.dividends.map(divFingerprint))
   const uniqueBDivs = b.dividends.filter(d => !seenDivs.has(divFingerprint(d)))
 
-  const duplicateCount = b.trades.length - uniqueBTrades.length + b.dividends.length - uniqueBDivs.length
+  const caFingerprint = (ca: NormalizedCorporateAction) =>
+    `${ca.symbol}_${ca.date.getTime()}_${ca.type}`
+  const seenCAs = new Set(a.corporateActions.map(caFingerprint))
+  const uniqueBCAs = b.corporateActions.filter(ca => !seenCAs.has(caFingerprint(ca)))
+
+  const duplicateCount =
+    b.trades.length - uniqueBTrades.length +
+    b.dividends.length - uniqueBDivs.length +
+    b.corporateActions.length - uniqueBCAs.length
+
   const warnings = [...a.rawWarnings, ...b.rawWarnings]
   if (duplicateCount > 0) {
     warnings.push(`${duplicateCount} registros duplicados detectados al combinar archivos — se han ignorado.`)
@@ -240,6 +370,8 @@ export function mergeStatements(a: NormalizedStatement, b: NormalizedStatement):
     ...a,
     trades: [...a.trades, ...uniqueBTrades],
     dividends: [...a.dividends, ...uniqueBDivs],
+    corporateActions: [...a.corporateActions, ...uniqueBCAs],
     rawWarnings: warnings,
+    ecbRatesUsed: a.ecbRatesUsed || b.ecbRatesUsed,
   }
 }

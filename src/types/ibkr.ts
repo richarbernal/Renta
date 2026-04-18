@@ -63,6 +63,25 @@ export interface IBKRRawOpenPosition {
   underlyingSymbol?: string
 }
 
+// IBKR corporate action type codes (Flex Query XML)
+// FS=ForwardSplit, RS=ReverseSplit, TC=TenderOffer/CashMerger,
+// TO=Takeover(stock), SO=Spinoff, OR=Reorganization/NameChange, SD=StockDividend
+export interface IBKRRawCorporateAction {
+  assetCategory: string
+  currency: string
+  symbol: string
+  isin?: string
+  description: string
+  reportDate: string
+  dateTime: string
+  quantity: number
+  proceeds: number       // non-zero for cash mergers
+  value: number
+  realizedPnL: number
+  code: string           // IBKR action code: FS, RS, TC, SO, OR, SD, TO...
+  typeCode?: string      // Flex XML "type" attribute
+}
+
 export interface IBKRRawStatement {
   accountId: string
   fromDate: string
@@ -71,4 +90,5 @@ export interface IBKRRawStatement {
   dividends: IBKRRawDividend[]
   withholdingTax: IBKRRawWithholdingTax[]
   openPositions: IBKRRawOpenPosition[]
+  corporateActions: IBKRRawCorporateAction[]
 }

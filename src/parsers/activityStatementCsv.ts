@@ -1,5 +1,5 @@
 import Papa from 'papaparse'
-import type { IBKRRawStatement, IBKRRawTrade, IBKRRawDividend, IBKRRawWithholdingTax, IBKRRawOpenPosition } from '@/types/ibkr'
+import type { IBKRRawStatement, IBKRRawTrade, IBKRRawDividend, IBKRRawWithholdingTax, IBKRRawOpenPosition, IBKRRawCorporateAction } from '@/types/ibkr'
 
 // IBKR Activity Statement CSV: multiple logical tables in one file.
 // Each section starts with: SectionName,Header,col1,col2,...
@@ -197,6 +197,28 @@ export function extractSymbolFromDescription(description: string): string {
   return match ? match[1] : description.split(' ')[0]
 }
 
+function parseCorporateActions(sections: Map<string, SectionRows>): IBKRRawCorporateAction[] {
+  const section = sections.get('Corporate Actions')
+  if (!section) return []
+  return section.rows
+    .filter(r => r['Asset Category'] && r['Asset Category'] !== 'Total')
+    .map(r => ({
+      assetCategory: r['Asset Category'] ?? '',
+      currency: r['Currency'] ?? 'USD',
+      symbol: extractSymbolFromDescription(r['Description'] ?? ''),
+      isin: extractIsinFromDescription(r['Description'] ?? '') ?? undefined,
+      description: r['Description'] ?? '',
+      reportDate: r['Report Date'] ?? r['Date/Time'] ?? '',
+      dateTime: r['Date/Time'] ?? r['Report Date'] ?? '',
+      quantity: num(r['Quantity']),
+      proceeds: num(r['Proceeds']),
+      value: num(r['Value']),
+      realizedPnL: num(r['Realized P/L'] ?? r['Realized P&L']),
+      code: r['Code'] ?? '',
+      typeCode: undefined,
+    }))
+}
+
 export function parseActivityStatementCsv(csvText: string): IBKRRawStatement {
   const sections = parseSections(csvText)
   extractFxRate(sections) // reserved for future embedded FX rate usage
@@ -210,5 +232,6 @@ export function parseActivityStatementCsv(csvText: string): IBKRRawStatement {
     dividends: parseDividends(sections),
     withholdingTax: parseWithholdingTax(sections),
     openPositions: parseOpenPositions(sections),
+    corporateActions: parseCorporateActions(sections),
   }
 }

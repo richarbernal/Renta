@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { RefreshCw, TrendingUp, TrendingDown, DollarSign, BarChart3, AlertTriangle } from 'lucide-react'
+import { RefreshCw, TrendingUp, TrendingDown, DollarSign, BarChart3, AlertTriangle, Building2 } from 'lucide-react'
 import type { TaxSummary } from '@/types/calculations'
 import { formatCurrency, cn } from '@/lib/utils'
 import { useFileProcessor } from '@/hooks/useFileProcessor'
@@ -8,10 +8,11 @@ import { OptionsTable } from './OptionsTable'
 import { DividendsTable } from './DividendsTable'
 import { SummaryPanel } from './SummaryPanel'
 import { WashSaleWarnings } from './WashSaleWarnings'
+import { CorporateActionsInfo } from './CorporateActionsInfo'
 import { ExportBar } from '@/components/export/ExportBar'
 import { useAppContext } from '@/store/AppContext'
 
-type TabId = 'acciones' | 'opciones' | 'dividendos' | 'resumen'
+type TabId = 'acciones' | 'opciones' | 'dividendos' | 'acciones-corp' | 'resumen'
 
 interface Props { results: TaxSummary }
 
@@ -19,6 +20,8 @@ export function ResultsTabs({ results }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('resumen')
   const { reset } = useFileProcessor()
   const { state } = useAppContext()
+
+  const corporateActionsCount = state.statement?.corporateActions.length ?? 0
 
   const tabs: { id: TabId; label: string; icon: React.ReactNode; badge?: string }[] = [
     {
@@ -45,13 +48,19 @@ export function ResultsTabs({ results }: Props) {
       icon: <DollarSign className="w-4 h-4" />,
       badge: `${results.dividends.lines.length} pagos`,
     },
+    ...(corporateActionsCount > 0 ? [{
+      id: 'acciones-corp' as TabId,
+      label: 'Acc. corporativas',
+      icon: <Building2 className="w-4 h-4" />,
+      badge: `${corporateActionsCount}`,
+    }] : []),
   ]
 
   return (
     <div className="space-y-4">
       {/* Account info bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white border rounded-lg px-4 py-3">
-        <div className="flex items-center gap-4 text-sm">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
           <span className="text-gray-500">Cuenta:</span>
           <span className="font-mono font-semibold text-gray-800">{state.statement?.accountId ?? '—'}</span>
           <span className="text-gray-400">|</span>
@@ -59,6 +68,11 @@ export function ResultsTabs({ results }: Props) {
           <span className="font-semibold">{state.statement?.fiscalYear ?? '—'}</span>
           <span className="text-gray-400">|</span>
           <span className="text-gray-500">{state.files.map(f => f.name).join(', ')}</span>
+          <span className="text-gray-400">|</span>
+          {state.ecbRatesAvailable
+            ? <span className="inline-flex items-center gap-1 text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full">Tipos BCE aplicados</span>
+            : <span className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">Tipos IBKR (BCE no disponible)</span>
+          }
         </div>
         <div className="flex items-center gap-2">
           <ExportBar results={results} />
@@ -120,6 +134,9 @@ export function ResultsTabs({ results }: Props) {
         )}
         {activeTab === 'opciones' && <OptionsTable result={results.options} />}
         {activeTab === 'dividendos' && <DividendsTable result={results.dividends} />}
+        {activeTab === 'acciones-corp' && (
+          <CorporateActionsInfo actions={state.statement?.corporateActions ?? []} />
+        )}
       </div>
     </div>
   )

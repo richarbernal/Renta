@@ -2,7 +2,7 @@ import { createContext, useContext, useReducer, type ReactNode } from 'react'
 import type { NormalizedStatement } from '@/types/normalized'
 import type { TaxSummary } from '@/types/calculations'
 
-export type AppPhase = 'idle' | 'parsing' | 'calculating' | 'ready' | 'error'
+export type AppPhase = 'idle' | 'fetching-rates' | 'parsing' | 'calculating' | 'ready' | 'error'
 
 export interface LoadedFile {
   name: string
@@ -18,10 +18,13 @@ export interface AppState {
   errors: string[]
   warnings: string[]
   parseProgress: string
+  ecbRatesAvailable: boolean
 }
 
 type AppAction =
   | { type: 'FILES_ADDED'; files: LoadedFile[] }
+  | { type: 'FETCH_RATES_START' }
+  | { type: 'FETCH_RATES_DONE'; available: boolean }
   | { type: 'PARSE_START' }
   | { type: 'PARSE_PROGRESS'; message: string }
   | { type: 'PARSE_SUCCESS'; statement: NormalizedStatement }
@@ -37,12 +40,17 @@ const initialState: AppState = {
   errors: [],
   warnings: [],
   parseProgress: '',
+  ecbRatesAvailable: false,
 }
 
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'FILES_ADDED':
       return { ...state, files: action.files, errors: [] }
+    case 'FETCH_RATES_START':
+      return { ...state, phase: 'fetching-rates', parseProgress: 'Obteniendo tipos de cambio del BCE…' }
+    case 'FETCH_RATES_DONE':
+      return { ...state, ecbRatesAvailable: action.available }
     case 'PARSE_START':
       return { ...state, phase: 'parsing', errors: [], warnings: [], parseProgress: 'Leyendo archivo…' }
     case 'PARSE_PROGRESS':

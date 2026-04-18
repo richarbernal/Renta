@@ -8,7 +8,7 @@ import { useAppContext } from '@/store/AppContext'
 export function DropZone() {
   const { state } = useAppContext()
   const { processFiles } = useFileProcessor()
-  const isLoading = state.phase === 'parsing' || state.phase === 'calculating'
+  const isLoading = state.phase === 'fetching-rates' || state.phase === 'parsing' || state.phase === 'calculating'
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
