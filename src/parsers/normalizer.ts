@@ -183,7 +183,7 @@ function matchDividendsAndWithholding(
     const withheld = wh ? Math.abs(wh.amount) : 0
 
     const eurRate = resolveEurRate(
-      div.currency, divDate, undefined, ecbRates, warnings,
+      div.currency, divDate, div.fxRateToBase, ecbRates, warnings,
       `dividendo ${sym} ${div.date}`
     )
 
