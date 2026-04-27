@@ -7,6 +7,11 @@ export default defineConfig({
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') },
   },
+  test: {
+    environment: 'node',
+    globals: true,
+    alias: { '@': path.resolve(__dirname, './src') },
+  },
   build: {
     target: 'es2020',
     rollupOptions: {

@@ -1,10 +1,17 @@
-import { AlertCircle, RefreshCw, FileText, X, Play, FileBarChart2 } from 'lucide-react'
+import { AlertCircle, RefreshCw, FileText, X, Play, FileBarChart2, Clock } from 'lucide-react'
 import { useAppContext } from '@/store/AppContext'
 import { useFileProcessor } from '@/hooks/useFileProcessor'
 import { DropZone } from './DropZone'
 import { FormatGuide } from './FormatGuide'
 import { FISCAL_YEAR } from '@/types/tax'
 import { detectFormat } from '@/parsers'
+
+function isHistoricalFilename(name: string): boolean {
+  // Heuristic: filename contains a 4-digit year that is before FISCAL_YEAR
+  const matches = name.match(/\b(20\d{2})\b/g)
+  if (!matches) return false
+  return matches.some(y => parseInt(y, 10) < FISCAL_YEAR)
+}
 
 function formatBadge(format: string) {
   const map: Record<string, { label: string; color: string }> = {
@@ -50,6 +57,7 @@ export function UploadPage() {
           {state.stagedFiles.map((file, i) => {
             const fmt = detectFormat(file.name, '')
             const badge = formatBadge(fmt)
+            const isHistorical = isHistoricalFilename(file.name)
             return (
               <div key={`${file.name}:${file.size}`} className="flex items-center gap-3 px-4 py-3">
                 <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />
@@ -57,6 +65,12 @@ export function UploadPage() {
                   <p className="text-sm font-medium text-gray-800 truncate">{file.name}</p>
                   <p className="text-xs text-gray-400">{formatSize(file.size)}</p>
                 </div>
+                {isHistorical && (
+                  <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500" title="Este archivo aportará histórico de operaciones para FIFO y regla de los 2 meses, pero no genera casillas fiscales.">
+                    <Clock className="w-3 h-3" />
+                    Histórico
+                  </span>
+                )}
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badge.color}`}>
                   {badge.label}
                 </span>
