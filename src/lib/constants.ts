@@ -1,4 +1,4 @@
-export const FISCAL_YEAR = 2025
+export { FISCAL_YEAR } from '@/types/tax'
 export const FISCAL_YEAR_START = new Date(2025, 0, 1)
 export const FISCAL_YEAR_END = new Date(2025, 11, 31)
 

@@ -133,7 +133,7 @@ interface DivGroup {
   symbol: string
   isin: string
   currency: string
-  fxRate: number
+  fxRate: number | undefined
   payDate: string
   grossAmount: number
   tax: number
@@ -159,11 +159,12 @@ export function parseFlexDividendCsv(csvText: string): IBKRRawStatement {
     const tax = num(row['Tax'])
 
     if (!groups.has(actionId)) {
+      const rawFxRate = num(row['FXRateToBase'])
       groups.set(actionId, {
         symbol:      str(row['Symbol']),
         isin:        str(row['ISIN']),
         currency:    str(row['CurrencyPrimary'] ?? row['Currency']) || 'EUR',
-        fxRate:      num(row['FXRateToBase']) || 1,
+        fxRate:      rawFxRate > 0 ? rawFxRate : undefined,
         payDate:     str(row['PayDate']),
         grossAmount: 0,
         tax:         0,

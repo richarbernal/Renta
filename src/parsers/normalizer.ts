@@ -167,6 +167,7 @@ function matchDividendsAndWithholding(
   warnings: string[]
 ): NormalizedDividend[] {
   const result: NormalizedDividend[] = []
+  const usedWithholding = new Set<number>() // indices into rawWithholding
 
   for (const div of rawDividends) {
     const sym = extractSymbolFromDescription(div.description)
@@ -174,13 +175,25 @@ function matchDividendsAndWithholding(
     const divDate = parseIbkrDate(div.date)
     if (!divDate || div.amount <= 0) continue
 
-    const wh = rawWithholding.find(w => {
-      const wSym  = extractSymbolFromDescription(w.description)
-      const wDate = parseIbkrDate(w.date)
-      return wSym === sym && wDate && Math.abs(wDate.getTime() - divDate.getTime()) < 86_400_000 * 3
-    })
+    // 1) Exact description match (same description text, negative amount)
+    let whIdx = rawWithholding.findIndex((w, i) =>
+      !usedWithholding.has(i) &&
+      w.description === div.description &&
+      w.amount < 0
+    )
 
-    const withheld = wh ? Math.abs(wh.amount) : 0
+    // 2) Fallback: same symbol + within 3 days
+    if (whIdx === -1) {
+      whIdx = rawWithholding.findIndex((w, i) => {
+        if (usedWithholding.has(i) || w.amount >= 0) return false
+        const wSym  = extractSymbolFromDescription(w.description)
+        const wDate = parseIbkrDate(w.date)
+        return wSym === sym && wDate && Math.abs(wDate.getTime() - divDate.getTime()) < 86_400_000 * 3
+      })
+    }
+
+    const withheld = whIdx !== -1 ? Math.abs(rawWithholding[whIdx].amount) : 0
+    if (whIdx !== -1) usedWithholding.add(whIdx)
 
     const eurRate = resolveEurRate(
       div.currency, divDate, div.fxRateToBase, ecbRates, warnings,
@@ -203,14 +216,16 @@ function matchDividendsAndWithholding(
     })
   }
 
-  for (const wh of rawWithholding) {
-    if (wh.amount >= 0) continue
+  // Warn about withholding entries that couldn't be matched to any dividend
+  rawWithholding.forEach((wh, i) => {
+    if (usedWithholding.has(i) || wh.amount >= 0) return
     const sym = extractSymbolFromDescription(wh.description)
-    const hasDividend = rawDividends.some(d => extractSymbolFromDescription(d.description) === sym)
-    if (!hasDividend) {
-      warnings.push(`Retención sin dividendo correspondiente para ${sym} el ${wh.date}`)
-    }
-  }
+    const whDate = parseIbkrDate(wh.date)
+    const dateStr = whDate ? whDate.toISOString().slice(0, 10) : wh.date
+    warnings.push(
+      `Retención sin dividendo correspondiente: ${sym} ${dateStr} — ${Math.abs(wh.amount).toFixed(2)} ${wh.currency}. Verifica manualmente.`
+    )
+  })
 
   return result
 }

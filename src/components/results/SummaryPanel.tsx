@@ -6,7 +6,7 @@ import { FISCAL_YEAR } from '@/types/tax'
 interface Props { results: TaxSummary }
 
 export function SummaryPanel({ results }: Props) {
-  const { baseAhorro, taxBrackets, estimatedTax, casillaSummary } = results
+  const { baseAhorro, taxBrackets, estimatedTax, taxAfterDeductions, dobleImposicion, casillaSummary } = results
 
   return (
     <div className="space-y-6">
@@ -58,9 +58,19 @@ export function SummaryPanel({ results }: Props) {
                 </div>
               </div>
             ))}
-            <div className="px-4 py-3 flex justify-between items-center bg-blue-50">
+            <div className="px-4 py-2.5 flex justify-between items-center bg-blue-50">
               <span className="font-semibold text-blue-900">Cuota íntegra estimada (base ahorro)</span>
-              <span className="text-xl font-bold text-blue-700">{formatCurrency(estimatedTax)}</span>
+              <span className="text-lg font-bold text-blue-700">{formatCurrency(estimatedTax)}</span>
+            </div>
+            {dobleImposicion > 0 && (
+              <div className="px-4 py-2 flex justify-between items-center bg-blue-50 border-t border-blue-100">
+                <span className="text-sm text-blue-700">− Deducción doble imposición (art. 80)</span>
+                <span className="text-sm font-semibold text-blue-600">− {formatCurrency(dobleImposicion)}</span>
+              </div>
+            )}
+            <div className="px-4 py-3 flex justify-between items-center bg-blue-100">
+              <span className="font-semibold text-blue-900">Cuota estimada tras deducciones</span>
+              <span className="text-xl font-bold text-blue-800">{formatCurrency(taxAfterDeductions)}</span>
             </div>
           </div>
         </section>

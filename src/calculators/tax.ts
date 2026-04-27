@@ -51,6 +51,8 @@ export function calculateTaxSummary(
     { casilla: CASILLAS.DOBLE_IMPOSICION_INTERNACIONAL, description: 'Deducción doble imposición internacional (art. 80)',     value: dividends.casilla0588 },
   ]
 
+  const taxAfterDeductions = roundEur(Math.max(0, estimatedTax - dividends.casilla0588))
+
   return {
     stocks,
     options,
@@ -63,6 +65,7 @@ export function calculateTaxSummary(
     },
     taxBrackets: brackets,
     estimatedTax,
+    taxAfterDeductions,
     retencionesDividendos: dividends.casilla0031,
     dobleImposicion: dividends.casilla0588,
     casillaSummary,

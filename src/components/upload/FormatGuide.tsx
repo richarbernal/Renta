@@ -5,7 +5,7 @@ const FLEX_FIELDS: { section: string; fields: string[] }[] = [
   {
     section: 'Trades',
     fields: [
-      'Asset Category', 'Currency', 'Symbol', 'Description', 'ISIN',
+      'Asset Category', 'Sub Category', 'Currency', 'Symbol', 'Description', 'ISIN',
       'Trade Date', 'Trade Time', 'Quantity', 'Trade Price', 'Trade Money',
       'Proceeds', 'IB Commission', 'Open/Close Indicator', 'Buy/Sell',
       'FX Rate To Base', 'Multiplier', 'Put/Call', 'Strike', 'Expiry',
@@ -119,22 +119,44 @@ export function FormatGuide() {
             </ol>
           </div>
 
+          {/* Dividendos separados */}
+          <div>
+            <p className="font-semibold mb-2">Archivo separado para dividendos (Flex Query CSV)</p>
+            <p className="text-xs text-blue-800 mb-2">
+              Si usas Flex Query, los dividendos se exportan en un archivo CSV separado con la sección <em>Dividends</em>.
+              Crea una segunda Flex Query con las siguientes columnas y arrástrala junto con el archivo de operaciones:
+            </p>
+            <div className="bg-white border border-blue-200 rounded p-2">
+              <div className="flex flex-wrap gap-1">
+                {['Symbol', 'ISIN', 'Currency', 'FX Rate To Base', 'Pay Date', 'Ex Date',
+                  'Gross Amount', 'Tax', 'Action ID', 'Level Of Detail'].map(f => (
+                  <span key={f} className="inline-flex items-center gap-1 text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
+                    <CheckCircle2 className="w-3 h-3 text-blue-500 flex-shrink-0" />
+                    {f}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* Consejos */}
           <div className="space-y-1">
             <p className="font-semibold">Consejos</p>
             <ul className="list-disc list-inside space-y-1 text-blue-800 text-xs">
               <li>
-                Puedes subir el CSV <em>y</em> el XML a la vez: los datos se fusionan y se eliminan duplicados automáticamente.
+                Añade todos los archivos antes de pulsar <strong>Generar resultado</strong>: operaciones 2025, dividendos y, si tienes posiciones abiertas desde años anteriores, también los CSVs históricos.
               </li>
               <li>
-                Si tienes varias cuentas, sube los archivos de todas a la vez.
+                Puedes subir el CSV de Activity Statement <em>y</em> el XML de Flex Query a la vez: los datos se fusionan y se eliminan duplicados automáticamente.
               </li>
               <li>
-                Si operaste con divisas distintas al euro, se usan automáticamente los tipos de cambio del BCE.
-                Si el BCE no tiene tipo para una fecha concreta, se usa el tipo incrustado por IBKR.
+                Si tienes varias cuentas IBKR, sube los archivos de todas ellas.
               </li>
               <li>
-                El procesamiento es <strong>completamente local</strong> — ningún dato sale de tu ordenador.
+                Los tipos de cambio se obtienen automáticamente del BCE. Si el BCE no cubre una fecha o divisa, se usa el tipo incrustado por IBKR.
+              </li>
+              <li>
+                El procesamiento es <strong>completamente local</strong> — ningún dato financiero sale de tu ordenador.
               </li>
             </ul>
           </div>

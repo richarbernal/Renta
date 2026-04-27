@@ -49,11 +49,20 @@ export function calculateDividends(stmt: NormalizedStatement): DividendsResult {
   }
 
   // Deducción por doble imposición internacional — Art. 80 LIRPF
-  // Limit: min(foreign tax paid, Spanish tax that would apply on that income)
-  // Spanish marginal rate estimated on dividends alone (conservative approach)
-  const marginalRate = marginalRateAhorro(totalGrossEur)
-  const spanishTaxOnDividends = roundEur(totalGrossEur * marginalRate)
-  const dobleImposicion = roundEur(Math.min(totalWithholdingEur, spanishTaxOnDividends))
+  // Cap computed per country: min(withholding_paid_country, Spanish_tax_on_income_from_country)
+  // Using the marginal rate of each country's income within the base del ahorro is an approximation;
+  // a precise calculation would require the full base del ahorro (stocks + options + dividends).
+  const dobleImposicionByCountry: Record<string, number> = {}
+  let dobleImposicion = 0
+  for (const [country, data] of Object.entries(byCountry)) {
+    if (data.withholding <= 0) continue
+    const marginalRate = marginalRateAhorro(data.gross)
+    const spanishTaxOnCountry = roundEur(data.gross * marginalRate)
+    const dd = roundEur(Math.min(data.withholding, spanishTaxOnCountry))
+    dobleImposicionByCountry[country] = dd
+    dobleImposicion += dd
+  }
+  dobleImposicion = roundEur(dobleImposicion)
 
   return {
     lines,
@@ -62,6 +71,7 @@ export function calculateDividends(stmt: NormalizedStatement): DividendsResult {
     totalNetEur,
     byCountry,
     dobleImposicion,
+    dobleImposicionByCountry,
     casilla0029: totalGrossEur,
     casilla0031: totalWithholdingEur,
     casilla0588: dobleImposicion,
