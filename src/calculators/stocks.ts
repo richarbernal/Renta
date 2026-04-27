@@ -359,12 +359,15 @@ export function calculateStocks(stmt: NormalizedStatement): StocksResult {
     }
   }
 
-  const gains    = lotMatches.filter(m => m.netGainLoss > 0).reduce((s, m) => s + m.netGainLoss, 0)
-  const losses   = lotMatches.filter(m => m.netGainLoss < 0).reduce((s, m) => s + m.netGainLoss, 0)
-  const deferred = lotMatches.filter(m => m.washSaleStatus === 'deferred').reduce((s, m) => s + Math.abs(m.grossGainLoss), 0)
+  // Only report sells from the fiscal year; historical sells only affect cost basis
+  const fiscalMatches = lotMatches.filter(m => m.sellDate.getFullYear() === stmt.fiscalYear)
+
+  const gains    = fiscalMatches.filter(m => m.netGainLoss > 0).reduce((s, m) => s + m.netGainLoss, 0)
+  const losses   = fiscalMatches.filter(m => m.netGainLoss < 0).reduce((s, m) => s + m.netGainLoss, 0)
+  const deferred = fiscalMatches.filter(m => m.washSaleStatus === 'deferred').reduce((s, m) => s + Math.abs(m.grossGainLoss), 0)
 
   return {
-    lotMatches,
+    lotMatches: fiscalMatches,
     openPositions,
     totalGains:    roundEur(gains),
     totalLosses:   roundEur(losses),

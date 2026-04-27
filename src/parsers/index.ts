@@ -2,6 +2,7 @@ import type { NormalizedStatement } from '@/types/normalized'
 import type { EcbRateLookup } from '@/lib/ecbRates'
 import { parseActivityStatementCsv } from './activityStatementCsv'
 import { parseFlexQueryXml } from './flexQueryXml'
+import { parseFlexQueryCsv } from './flexQueryCsv'
 import { normalizeStatement, mergeStatements } from './normalizer'
 
 export type DetectedFormat = 'activity-csv' | 'flex-xml' | 'flex-csv' | 'unknown'
@@ -12,11 +13,13 @@ export function detectFormat(filename: string, firstChunk: string): DetectedForm
   if (lower.endsWith('.xml')) return 'flex-xml'
 
   if (lower.endsWith('.csv')) {
-    const firstLines = firstChunk.slice(0, 2000)
-    if (firstLines.includes('FlexStatement') || firstLines.match(/TradeDate.*Symbol.*Currency/)) {
+    const firstLine = firstChunk.slice(0, 1000)
+    // Flat Flex CSV: single header row with IBKR Flex-specific column names
+    if (firstLine.includes('AssetClass') && firstLine.includes('CurrencyPrimary')) {
       return 'flex-csv'
     }
-    if (firstLines.match(/^(Statement|Trades|Dividends|Account Information),/m)) {
+    // Activity Statement: section-based rows starting with section name
+    if (firstLine.match(/^(Statement|Trades|Dividends|Account Information),/m)) {
       return 'activity-csv'
     }
     return 'activity-csv'
@@ -36,6 +39,11 @@ export async function parseFile(file: File, ecbRates: EcbRateLookup | null = nul
     return normalizeStatement(raw, 'flex-xml', ecbRates)
   }
 
+  if (format === 'flex-csv') {
+    const raw = parseFlexQueryCsv(text)
+    return normalizeStatement(raw, 'flex-csv', ecbRates)
+  }
+
   if (format === 'activity-csv') {
     const raw = parseActivityStatementCsv(text)
     return normalizeStatement(raw, 'activity-csv', ecbRates)
@@ -43,7 +51,7 @@ export async function parseFile(file: File, ecbRates: EcbRateLookup | null = nul
 
   throw new Error(
     `Formato de archivo no reconocido: "${file.name}". ` +
-    `Exporta un Activity Statement (CSV) o un Flex Query (XML) desde IBKR.`
+    `Exporta un Activity Statement (CSV) o un Flex Query (XML o CSV) desde IBKR.`
   )
 }
 

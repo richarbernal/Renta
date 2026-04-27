@@ -26,6 +26,7 @@ export interface IBKRRawTrade {
   expiry?: string
   underlyingSymbol?: string
   transactionType?: string
+  subCategory?: string   // 'ETF', 'COMMON', etc. (Flex CSV SubCategory field)
 }
 
 export interface IBKRRawDividend {
