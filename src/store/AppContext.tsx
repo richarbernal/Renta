@@ -12,7 +12,8 @@ export interface LoadedFile {
 
 export interface AppState {
   phase: AppPhase
-  files: LoadedFile[]
+  stagedFiles: File[]        // File objects waiting to be processed
+  files: LoadedFile[]        // display info for files that were processed
   statement: NormalizedStatement | null
   results: TaxSummary | null
   errors: string[]
@@ -22,6 +23,8 @@ export interface AppState {
 }
 
 type AppAction =
+  | { type: 'STAGE_FILES'; files: File[] }
+  | { type: 'UNSTAGE_FILE'; index: number }
   | { type: 'FILES_ADDED'; files: LoadedFile[] }
   | { type: 'FETCH_RATES_START' }
   | { type: 'FETCH_RATES_DONE'; available: boolean }
@@ -34,6 +37,7 @@ type AppAction =
 
 const initialState: AppState = {
   phase: 'idle',
+  stagedFiles: [],
   files: [],
   statement: null,
   results: null,
@@ -45,6 +49,13 @@ const initialState: AppState = {
 
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
+    case 'STAGE_FILES': {
+      const existing = new Set(state.stagedFiles.map(f => `${f.name}:${f.size}`))
+      const fresh = action.files.filter(f => !existing.has(`${f.name}:${f.size}`))
+      return { ...state, stagedFiles: [...state.stagedFiles, ...fresh], errors: [] }
+    }
+    case 'UNSTAGE_FILE':
+      return { ...state, stagedFiles: state.stagedFiles.filter((_, i) => i !== action.index) }
     case 'FILES_ADDED':
       return { ...state, files: action.files, errors: [] }
     case 'FETCH_RATES_START':

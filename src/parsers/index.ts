@@ -2,10 +2,10 @@ import type { NormalizedStatement } from '@/types/normalized'
 import type { EcbRateLookup } from '@/lib/ecbRates'
 import { parseActivityStatementCsv } from './activityStatementCsv'
 import { parseFlexQueryXml } from './flexQueryXml'
-import { parseFlexQueryCsv } from './flexQueryCsv'
+import { parseFlexQueryCsv, parseFlexDividendCsv } from './flexQueryCsv'
 import { normalizeStatement, mergeStatements } from './normalizer'
 
-export type DetectedFormat = 'activity-csv' | 'flex-xml' | 'flex-csv' | 'unknown'
+export type DetectedFormat = 'activity-csv' | 'flex-xml' | 'flex-csv' | 'flex-dividend-csv' | 'unknown'
 
 export function detectFormat(filename: string, firstChunk: string): DetectedFormat {
   const lower = filename.toLowerCase()
@@ -14,7 +14,11 @@ export function detectFormat(filename: string, firstChunk: string): DetectedForm
 
   if (lower.endsWith('.csv')) {
     const firstLine = firstChunk.slice(0, 1000)
-    // Flat Flex CSV: single header row with IBKR Flex-specific column names
+    // Dividend Flex CSV: GrossAmount + PayDate + ActionID columns (check before trades CSV)
+    if (firstLine.includes('GrossAmount') && firstLine.includes('PayDate') && firstLine.includes('ActionID')) {
+      return 'flex-dividend-csv'
+    }
+    // Trades Flex CSV: single header row with IBKR Flex-specific column names
     if (firstLine.includes('AssetClass') && firstLine.includes('CurrencyPrimary')) {
       return 'flex-csv'
     }
@@ -37,6 +41,11 @@ export async function parseFile(file: File, ecbRates: EcbRateLookup | null = nul
   if (format === 'flex-xml') {
     const raw = parseFlexQueryXml(text)
     return normalizeStatement(raw, 'flex-xml', ecbRates)
+  }
+
+  if (format === 'flex-dividend-csv') {
+    const raw = parseFlexDividendCsv(text)
+    return normalizeStatement(raw, 'flex-csv', ecbRates)
   }
 
   if (format === 'flex-csv') {

@@ -44,32 +44,42 @@ npm run type-check # Comprueba errores de TypeScript sin compilar
 
 ## Uso de la aplicación
 
-### 1. Exportar el informe desde IBKR
+### 1. Exportar los informes desde IBKR
 
-Tienes dos opciones para obtener el archivo:
+Tienes tres opciones para obtener los archivos:
 
-**Opción A — Activity Statement (CSV)** *(recomendado)*
+**Opción A — Activity Statement (CSV)** *(más sencillo)*
 1. Entra en el portal web de IBKR (Client Portal)
 2. Ve a **Informes → Extractos de Actividad**
 3. Selecciona periodo: **Año natural 2025**
 4. Formato: **CSV**
 5. Descarga el archivo
 
-**Opción B — Flex Query (XML)** *(más completo)*
+**Opción B — Flex Query (XML)** *(más completo y preciso)*
 1. Ve a **Informes → Flex Queries**
-2. Crea una query con las secciones: *Trades, Cash Transactions, Open Positions*
-3. Selecciona formato **XML** y periodo **2025**
-4. Ejecuta y descarga el archivo `.xml`
+2. Crea una query con las secciones: *Trades, Cash Transactions, Open Positions, Corporate Actions*
+3. Activa el campo **Sub Category** en la sección Trades (necesario para identificar ETFs)
+4. Selecciona formato **XML** y periodo **2025**
+5. Ejecuta y descarga el archivo `.xml`
 
-> Puedes subir ambos archivos a la vez para combinarlos automáticamente.
+**Opción C — Flex Query CSV (operaciones + dividendos separados)**
+- Crea una Flex Query con la sección *Trades* → exporta en CSV para las operaciones
+- Crea otra Flex Query con la sección *Dividends* → exporta en CSV para los dividendos
+- Incluye los campos: `Symbol, ISIN, Currency, FX Rate To Base, Pay Date, Gross Amount, Tax, Action ID, Level Of Detail`
+
+> Puedes combinar libremente los tres formatos: sube todos los archivos a la vez y la aplicación fusionará los datos eliminando duplicados.
 
 ---
 
-### 2. Procesar el informe
+### 2. Cargar los archivos
 
-1. Arrastra el archivo `.csv` o `.xml` a la zona de carga (o haz clic para buscarlo)
-2. La aplicación detecta el formato automáticamente y procesa los datos
-3. Los resultados aparecen organizados en cuatro pestañas
+La aplicación usa un modelo de **carga por lotes** para garantizar la consistencia del cálculo:
+
+1. **Arrastra o selecciona** todos los archivos que quieres procesar (puedes añadir y quitar antes de calcular)
+2. Si tienes **posiciones abiertas desde años anteriores** (compras previas a 2025), incluye también los CSVs históricos — son necesarios para el cálculo FIFO correcto y para la regla de los dos meses
+3. Cuando hayas añadido todos los archivos, pulsa **Generar resultado**
+
+> Los archivos históricos (de años anteriores al 2025) se procesan para calcular la base de coste FIFO correctamente, pero solo las operaciones cerradas en 2025 aparecen en los resultados fiscales.
 
 ---
 
@@ -79,8 +89,9 @@ Tienes dos opciones para obtener el archivo:
 |---|---|
 | **Resumen IRPF** | Casillas para la declaración, tramos de tributación y cuota estimada |
 | **Acciones** | Operaciones de compraventa con cálculo FIFO, resultado neto y pérdidas diferidas por la regla de los dos meses |
-| **Opciones** | Puts y calls: primas cobradas/pagadas, vencimientos y cierres |
-| **Dividendos** | Dividendos cobrados por país con retención en origen y deducción doble imposición |
+| **Opciones** | Puts y calls cerradas en 2025: primas cobradas/pagadas, vencimientos y cierres |
+| **Dividendos** | Dividendos cobrados en 2025 por país con retención en origen y deducción doble imposición |
+| **Avisos** | Advertencias sobre datos incompletos, tipos de cambio faltantes o registros ignorados |
 
 #### Casillas que se calculan
 
@@ -100,7 +111,7 @@ Tienes dos opciones para obtener el archivo:
 
 Desde la barra superior de resultados:
 
-- **Exportar Excel** — genera un `.xlsx` con cuatro hojas: Acciones, Opciones, Dividendos y Resumen IRPF
+- **Exportar Excel** — genera un `.xlsx` con hojas: Acciones, Opciones, Dividendos y Resumen IRPF
 - **Exportar PDF** — genera un `.pdf` con todas las tablas y el resumen de casillas
 
 ---
@@ -116,10 +127,9 @@ export const FISCAL_YEAR = 2025
 ```
 
 Cambia este valor si necesitas procesar otro ejercicio fiscal.
-El mismo cambio hay que reflejarlo en `src/lib/constants.ts`:
+También actualiza las constantes derivadas en `src/lib/constants.ts`:
 
 ```ts
-export const FISCAL_YEAR = 2025
 export const FISCAL_YEAR_START = new Date(2025, 0, 1)
 export const FISCAL_YEAR_END   = new Date(2025, 11, 31)
 ```
@@ -187,7 +197,19 @@ export const KNOWN_ETF_ISINS = new Set([
 ])
 ```
 
-Los valores de este conjunto reciben la ventana de 31 días (1 mes) en lugar de los 61 días (2 meses) que aplican a las acciones individuales.
+Los ETFs también se detectan automáticamente a través del campo `SubCategory=ETF` de los archivos Flex Query. Los ISINs de este conjunto sirven como fallback cuando el campo no está disponible.
+
+---
+
+## Cálculo FIFO y regla de los dos meses
+
+El motor de cálculo aplica **FIFO estricto por símbolo** sobre el historial completo de operaciones que hayas subido. Esto significa:
+
+- Si compraste acciones en 2023 y las vendiste en 2025, el coste de compra de 2023 se usa correctamente para el cálculo de la plusvalía 2025
+- Las **pérdidas diferidas por la regla de los dos meses** (art. 33.5 LIRPF) se detectan cuando vendes a pérdida y vuelves a comprar el mismo valor dentro de los 61 días anteriores o posteriores (31 días para ETFs/IICs)
+- La pérdida diferida se añade al coste del lote de recompra y se realizará cuando ese lote se venda
+
+Para que estos cálculos sean correctos, es importante subir los archivos de todos los años en los que tuvieras posiciones abiertas.
 
 ---
 
@@ -202,32 +224,34 @@ src/
 │   └── ibkr.ts          # Formas crudas de los informes IBKR
 │
 ├── parsers/             # Lectura de archivos IBKR
-│   ├── activityStatementCsv.ts  # Parser del CSV de IBKR
+│   ├── activityStatementCsv.ts  # Parser del CSV de IBKR (Activity Statement)
 │   ├── flexQueryXml.ts          # Parser del XML Flex Query
+│   ├── flexQueryCsv.ts          # Parser del CSV Flex Query (operaciones + dividendos)
 │   ├── normalizer.ts            # Convierte datos crudos al modelo interno
 │   └── index.ts                 # Detección de formato y orquestación
 │
 ├── calculators/         # Lógica fiscal
-│   ├── stocks.ts        # FIFO + regla de los dos meses
-│   ├── options.ts       # P&L de opciones (primas, vencimientos, ejercicios)
-│   ├── dividends.ts     # Dividendos + retención + doble imposición
+│   ├── stocks.ts        # FIFO multi-año + regla de los dos meses
+│   ├── options.ts       # P&L de opciones cerradas en el año fiscal
+│   ├── dividends.ts     # Dividendos + retención + doble imposición por país
 │   └── tax.ts           # Agregador: base del ahorro, tramos, cuota estimada
 │
 ├── exporters/           # Generación de archivos descargables
-│   ├── excel.ts         # Exportación a .xlsx (4 hojas)
+│   ├── excel.ts         # Exportación a .xlsx
 │   └── pdf.ts           # Exportación a .pdf (jsPDF + autotable)
 │
 ├── components/          # Interfaz de usuario
-│   ├── upload/          # Pantalla de carga de archivos
+│   ├── upload/          # Pantalla de carga (DropZone, lista de archivos, guía)
 │   ├── results/         # Tablas de resultados y resumen IRPF
 │   ├── export/          # Botones de exportación
 │   └── layout/          # Cabecera y pie de página
 │
 ├── store/
-│   └── AppContext.tsx   # Estado global de la aplicación (useReducer)
+│   └── AppContext.tsx   # Estado global: stagedFiles + fase de procesamiento
 │
 └── lib/
-    ├── constants.ts     ← año fiscal y lista de ETFs conocidos
+    ├── constants.ts     ← año fiscal (re-exportado de tax.ts) y lista de ETFs conocidos
+    ├── ecbRates.ts      # Obtención de tipos de cambio del BCE (caché en memoria)
     └── utils.ts         # Formateo de números, fechas y monedas
 ```
 

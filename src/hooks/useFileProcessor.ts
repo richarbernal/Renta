@@ -9,9 +9,18 @@ import { fetchEcbRates, type EcbRateLookup } from '@/lib/ecbRates'
 import { FISCAL_YEAR } from '@/types/tax'
 
 export function useFileProcessor() {
-  const { dispatch } = useAppContext()
+  const { dispatch, state } = useAppContext()
 
-  const processFiles = useCallback(async (files: File[]) => {
+  const stageFiles = useCallback((files: File[]) => {
+    dispatch({ type: 'STAGE_FILES', files })
+  }, [dispatch])
+
+  const unstageFile = useCallback((index: number) => {
+    dispatch({ type: 'UNSTAGE_FILE', index })
+  }, [dispatch])
+
+  const processFiles = useCallback(async () => {
+    const files = state.stagedFiles
     if (files.length === 0) return
 
     const loadedFiles = files.map(f => ({
@@ -28,10 +37,8 @@ export function useFileProcessor() {
       ecbRates = await fetchEcbRates(FISCAL_YEAR)
       dispatch({ type: 'FETCH_RATES_DONE', available: true })
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      // Non-fatal: warn and continue without ECB rates (falls back to IBKR embedded rates)
       dispatch({ type: 'FETCH_RATES_DONE', available: false })
-      console.warn('ECB rates unavailable:', msg)
+      console.warn('ECB rates unavailable:', err instanceof Error ? err.message : err)
     }
 
     // ── Step 2: Parse files ──────────────────────────────────────────────────
@@ -61,11 +68,11 @@ export function useFileProcessor() {
       const msg = err instanceof Error ? err.message : 'Error desconocido al procesar el archivo.'
       dispatch({ type: 'ERROR', error: msg })
     }
-  }, [dispatch])
+  }, [dispatch, state.stagedFiles])
 
   const reset = useCallback(() => {
     dispatch({ type: 'RESET' })
   }, [dispatch])
 
-  return { processFiles, reset }
+  return { stageFiles, unstageFile, processFiles, reset }
 }

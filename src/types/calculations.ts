@@ -93,6 +93,7 @@ export interface DividendsResult {
   totalNetEur: number
   byCountry: Record<string, { gross: number; withholding: number; count: number }>
   dobleImposicion: number
+  dobleImposicionByCountry: Record<string, number>   // per-country Art. 80 credit
   casilla0029: number         // dividendos íntegros
   casilla0031: number         // retenciones sobre dividendos
   casilla0588: number         // deducción doble imposición internacional
@@ -118,6 +119,7 @@ export interface TaxSummary {
   }
   taxBrackets: TaxBracketRow[]
   estimatedTax: number
+  taxAfterDeductions: number   // estimatedTax - dobleImposicion (Art. 80 credit applied)
   retencionesDividendos: number
   dobleImposicion: number
   casillaSummary: { casilla: string; description: string; value: number }[]

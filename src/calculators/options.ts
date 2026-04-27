@@ -119,7 +119,7 @@ export function calculateOptions(stmt: NormalizedStatement): OptionsResult {
   }
 
   // Any options that expired at year-end (open positions with expiry <= Dec 31)
-  const yearEnd = new Date(FISCAL_YEAR, 11, 31)
+  const yearEnd = new Date(stmt.fiscalYear, 11, 31)
   for (const [key, legs] of openLegs.entries()) {
     for (const leg of legs) {
       // Find the original trade to get expiry info
@@ -158,12 +158,17 @@ export function calculateOptions(stmt: NormalizedStatement): OptionsResult {
     }
   }
 
-  const gains = closedTrades.filter(t => t.gainLossEur > 0).reduce((s, t) => s + t.gainLossEur, 0)
-  const losses = closedTrades.filter(t => t.gainLossEur < 0).reduce((s, t) => s + t.gainLossEur, 0)
+  // Filter to fiscal year: only report options closed/expired in the declared year
+  const fiscalClosed = closedTrades.filter(
+    t => t.closeDate && t.closeDate.getFullYear() === stmt.fiscalYear
+  )
+
+  const gains = fiscalClosed.filter(t => t.gainLossEur > 0).reduce((s, t) => s + t.gainLossEur, 0)
+  const losses = fiscalClosed.filter(t => t.gainLossEur < 0).reduce((s, t) => s + t.gainLossEur, 0)
   const net = roundEur(gains + losses)
 
   return {
-    trades: closedTrades,
+    trades: fiscalClosed,
     openPositions: openOptions,
     totalGains: roundEur(gains),
     totalLosses: roundEur(losses),

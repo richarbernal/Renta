@@ -279,7 +279,8 @@ export function calculateStocks(stmt: NormalizedStatement): StocksResult {
         const lot            = queue[0]
         const matched        = Math.min(remainingQty, lot.quantity)
         const portionFraction = matched / Math.abs(trade.quantity)
-        const costBasisEur   = roundEur(matched * lot.costPerUnitEur + matched * lot.deferredBasisAdjustment)
+        const deferredInLot  = roundEur(matched * lot.deferredBasisAdjustment)
+        const costBasisEur   = roundEur(matched * lot.costPerUnitEur + deferredInLot)
         const proceedsEur    = roundEur(totalProceeds * portionFraction)
         const grossGainLoss  = roundEur(proceedsEur + costBasisEur)  // costBasisEur is negative
 
@@ -297,8 +298,8 @@ export function calculateStocks(stmt: NormalizedStatement): StocksResult {
           buyDate:             lot.buyDate,
           sellDate:            trade.tradeDate,
           holdingDays:         daysBetween(lot.buyDate, trade.tradeDate),
-          washSaleStatus:      'none',
-          washSaleAdjustment:  0,
+          washSaleStatus:      deferredInLot > 0 ? 'applied' : 'none',
+          washSaleAdjustment:  deferredInLot,  // positive = deferred loss absorbed in this sale
           netGainLoss:         grossGainLoss,
         })
 

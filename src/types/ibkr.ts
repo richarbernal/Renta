@@ -34,6 +34,7 @@ export interface IBKRRawDividend {
   date: string
   description: string
   amount: number
+  fxRateToBase?: number   // embedded FX rate (fallback when ECB unavailable)
 }
 
 export interface IBKRRawWithholdingTax {
@@ -42,6 +43,7 @@ export interface IBKRRawWithholdingTax {
   description: string
   amount: number
   code?: string
+  fxRateToBase?: number
 }
 
 export interface IBKRRawOpenPosition {

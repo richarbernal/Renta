@@ -124,3 +124,95 @@ export function parseFlexQueryCsv(csvText: string): IBKRRawStatement {
     corporateActions,
   }
 }
+
+// ── Flex Dividend CSV ─────────────────────────────────────────────────────────
+// IBKR "Dividends" Flex section CSV: one row per dividend event (Po=payment, Re=reversal).
+// Groups by ActionID and nets Po+Re entries to get final settled amounts.
+
+interface DivGroup {
+  symbol: string
+  isin: string
+  currency: string
+  fxRate: number | undefined
+  payDate: string
+  grossAmount: number
+  tax: number
+}
+
+export function parseFlexDividendCsv(csvText: string): IBKRRawStatement {
+  const result = Papa.parse<Record<string, string>>(csvText, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (h: string) => h.trim(),
+  })
+
+  const groups = new Map<string, DivGroup>()
+
+  for (const row of result.data) {
+    const level = str(row['LevelOfDetail'])
+    if (level === 'SUMMARY' || level === 'SUBTOTAL') continue
+
+    const actionId = str(row['ActionID'])
+    if (!actionId) continue
+
+    const grossAmount = num(row['GrossAmount'])
+    const tax = num(row['Tax'])
+
+    if (!groups.has(actionId)) {
+      const rawFxRate = num(row['FXRateToBase'])
+      groups.set(actionId, {
+        symbol:      str(row['Symbol']),
+        isin:        str(row['ISIN']),
+        currency:    str(row['CurrencyPrimary'] ?? row['Currency']) || 'EUR',
+        fxRate:      rawFxRate > 0 ? rawFxRate : undefined,
+        payDate:     str(row['PayDate']),
+        grossAmount: 0,
+        tax:         0,
+      })
+    }
+
+    const g = groups.get(actionId)!
+    g.grossAmount += grossAmount
+    g.tax         += tax
+  }
+
+  const dividends: IBKRRawDividend[] = []
+  const withholdingTax: IBKRRawWithholdingTax[] = []
+
+  for (const g of groups.values()) {
+    if (g.grossAmount < 0.001) continue   // fully reversed / voided
+
+    // Description format that extractSymbolFromDescription & extractIsinFromDescription can parse
+    const desc = `${g.symbol} (${g.isin}) Dividendo`
+
+    dividends.push({
+      currency:      g.currency,
+      date:          g.payDate,
+      description:   desc,
+      amount:        g.grossAmount,
+      fxRateToBase:  g.fxRate,
+    })
+
+    const netTax = Math.abs(g.tax)
+    if (netTax > 0.001) {
+      withholdingTax.push({
+        currency:      g.currency,
+        date:          g.payDate,
+        description:   desc,   // same desc → matched by symbol + date in normalizer
+        amount:        -netTax, // negative: money withheld at source
+        fxRateToBase:  g.fxRate,
+      })
+    }
+  }
+
+  return {
+    accountId:       'UNKNOWN',
+    fromDate:        '',
+    toDate:          '',
+    trades:          [],
+    dividends,
+    withholdingTax,
+    openPositions:   [],
+    corporateActions: [],
+  }
+}
