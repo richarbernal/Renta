@@ -11,8 +11,18 @@ import { extractIsinFromDescription, extractSymbolFromDescription } from './acti
 
 function parseIbkrDate(val: string): Date | null {
   if (!val || val === '--') return null
-  const clean = val.replace(',', '').trim()
-  const d = new Date(clean)
+  // Strip time portion: handles "2025-05-16;150000", "2025-05-16 15:00:00", "20250516;150000"
+  const datePart = val.replace(',', '').trim().split(/[; T]/)[0]
+  if (!datePart) return null
+  // yyyyMMdd (8 digits, no separators) — IBKR XML/CSV without ISO date format
+  if (/^\d{8}$/.test(datePart)) {
+    return new Date(
+      parseInt(datePart.slice(0, 4), 10),
+      parseInt(datePart.slice(4, 6), 10) - 1,
+      parseInt(datePart.slice(6, 8), 10)
+    )
+  }
+  const d = new Date(datePart)
   return isNaN(d.getTime()) ? null : d
 }
 
@@ -59,7 +69,8 @@ function resolveEurRate(
 
 function classifyAsset(raw: IBKRRawTrade): AssetType {
   const cat = raw.assetCategory.toLowerCase()
-  if (cat.includes('option')) return 'option'
+  if (cat.includes('option') || cat === 'opt') return 'option'
+  if (raw.subCategory === 'ETF') return 'etf'
   const isin = raw.isin
   if (isin && KNOWN_ETF_ISINS.has(isin)) return 'etf'
   const desc = raw.description.toLowerCase()
@@ -305,20 +316,20 @@ export function normalizeStatement(
     normalizeTradeRow(t, source, ecbRates, warnings)
   )
 
-  const fiscalTrades = trades.filter(t => t.tradeDate.getFullYear() === FISCAL_YEAR)
-  const otherYearCount = trades.length - fiscalTrades.length
-  if (otherYearCount > 0) {
-    warnings.push(`${otherYearCount} operaciones fuera del año fiscal ${FISCAL_YEAR} fueron ignoradas.`)
+  // Historical trades kept for multi-year FIFO and regla de los 2 meses
+  const historicalCount = trades.filter(t => t.tradeDate.getFullYear() !== FISCAL_YEAR).length
+  if (historicalCount > 0) {
+    warnings.push(`${historicalCount} operaciones históricas cargadas para cálculo de base de coste FIFO y regla de los 2 meses.`)
   }
 
   const dividends = matchDividendsAndWithholding(
     raw.dividends, raw.withholdingTax, source, ecbRates, warnings
   ).filter(d => d.payDate.getFullYear() === FISCAL_YEAR)
 
+  // Historical corporate actions kept (needed for cost basis of multi-year positions)
   const corporateActions: NormalizedCorporateAction[] = (raw.corporateActions ?? [])
     .map(ca => normalizeCorporateAction(ca, source, ecbRates, warnings))
     .filter((ca): ca is NormalizedCorporateAction => ca !== null)
-    .filter(ca => ca.date.getFullYear() === FISCAL_YEAR)
 
   const fromDate = parseIbkrDate(raw.fromDate) ?? new Date(FISCAL_YEAR, 0, 1)
   const toDate   = parseIbkrDate(raw.toDate)   ?? new Date(FISCAL_YEAR, 11, 31)
@@ -329,7 +340,7 @@ export function normalizeStatement(
     fromDate,
     toDate,
     generatedAt: new Date(),
-    trades: fiscalTrades,
+    trades,
     dividends,
     corporateActions,
     rawWarnings: warnings,
